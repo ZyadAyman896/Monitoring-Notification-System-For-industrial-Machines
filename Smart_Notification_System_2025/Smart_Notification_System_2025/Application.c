@@ -16,8 +16,10 @@
 /*                        global Variables			                    */
 /************************************************************************/
 
+/*	Variable for Uart received data	*/
 u8 DataReceived ;
 
+/*	Variables for the ICU Peripheral	*/
 volatile u8  g_state = 0 ;
 volatile u16 g_start_time = 0;
 volatile u16 g_end_time = 0;
@@ -26,13 +28,13 @@ volatile float32 g_distance_cm = 0;
 volatile float32 g_last_distance = -1;  /* Initialized to an impossible value	*/
 
 
-/**/
+/*	flag used for ISR of EXTI 1 used for smoke flag	 */
 volatile u8 g_smoke_flag = 0;
 
-/**/
+/*	flag used for ISR of EXTI 0 used for Vibration flag	 */
 volatile u8 g_vibration_flag = 0;
 
-/**/
+/*	flag used for ISR of Timer1 CTC used for time of usage of machine flag	 */
 volatile u8 g_Usage_Time_ofMachine_flag = 0;
 
 
@@ -52,23 +54,24 @@ int main(void)
 		
 		
 		/*	Init of the Servo motor		*/
-		SERVO_vInit(2);	
+		SERVO_vInit(1);	
 		
-		/*	LCD Init	*/
+		/*	LCD Init with 4-Bit mode	*/
 		LCD_vInit();
 	
-	
 		/*****************************************************************************/
-		/*****************************Timers Config***********************************/	
-	
-		/*	Configuring  Timer1	for CTC Mode with interrupt 	*/
-		Timer1_Configurations config =
-		{
-			.Mode = TIMER1_MODE_CTC ,	/*	Normal Overflow Mode	*/
-			.Interrupt_timer1 = TIMER1_INTERRUPT_ENABLED	/*	Interrupt Enabled	*/
-	    
+		/**********************************ADC Init***********************************/
+
+		/*	Configurations struct of ADC	*/
+		ADC_Config_t adcConfig = {
+			.ref = ADC_REF_AVCC,
+			.adjust = ADC_RIGHT_ADJUST,
+			.prescaler = ADC_PRESCALER_64
 		};
 
+		/*	Init of ADC with specific configurations	*/
+		ADC_vInit(adcConfig);		
+	
 		/*****************************************************************************/
 		/*****************************Ultrasonic Init*********************************/
 	
@@ -85,6 +88,14 @@ int main(void)
 
 		/*****************************************************************************/
 		/*******************************TIMER Init************************************/
+		
+		/*	Configuring  Timer1	for CTC Mode with interrupt 	*/
+		Timer1_Configurations config =
+		{
+			.Mode = TIMER1_MODE_CTC ,	/*	Normal Overflow Mode	*/
+			.Interrupt_timer1 = TIMER1_INTERRUPT_ENABLED	/*	Interrupt Enabled	*/
+			
+		};
     
 		/*	Initialization of Timer1	*/
 		TIMER1_vInit(&config);
@@ -98,43 +109,45 @@ int main(void)
 		/*	Prescaler Value	= 1024	*/
 		TIMER1_vStart(TIMER1_PRESCALER_1024);
     
-		/*****************************************************************************/
-		/*******************************EXTI******************************************/	
+		/**********************************************************************************/
+		/*******************************EXTI Init******************************************/	
 	
 		/*	Initializing External Interrupt 0	*/
-		EXTI_vInit(EXTI_INT0,EXTI_FALLING_EDGE);
+		EXTI_vInit(EXTI_INT0,EXTI_FALLING_EDGE);	/*	Vibration Sensor	*/
 
-		/*	Initializing External Interrupt 0	*/
-		EXTI_vInit(EXTI_INT1,EXTI_FALLING_EDGE);
+		/*	Initializing External Interrupt 1	*/
+		EXTI_vInit(EXTI_INT1,EXTI_FALLING_EDGE);	/*	Smoke Sensor	*/
 	
 		/*	Enabling EXTI0	*/
 		EXTI_vEnable(EXTI_INT0);
 	
-		/*	Enabling EXTI0	*/
+		/*	Enabling EXTI1	*/
 		EXTI_vEnable(EXTI_INT1);
 	
 		/*	Setting Callback Function to be executed by the ISR of INTERRUPT0	*/
-		EXTI_vSetCallback(EXTI_INT0,EXTI0_Handler);
+		EXTI_vSetCallback(EXTI_INT0,EXTI0_Handler);		/*	Vibration Sensor	*/
 	
-		/*	Setting Callback Function to be executed by the ISR of INTERRUPT0	*/
-		EXTI_vSetCallback(EXTI_INT1,EXTI1_Handler);		
+		/*	Setting Callback Function to be executed by the ISR of INTERRUPT1	*/
+		EXTI_vSetCallback(EXTI_INT1,EXTI1_Handler);		/*	Smoke Sensor	*/
 		
 		/************************************************************************/
 		/*                          UART INIT                                   */
 		/************************************************************************/
 		
-		/*	Initiallizing UART for using Bluetooth */
+		/*	Initiallizing UART for using Bluetooth at baud rate of 9600 b/s	 */
 		UART_vInit(UART_INTERRUPT_ENABLE,UART_BAUD_9600);
 	
 		/*	Setting the callback function to be called by the ISR	*/
 		UART_vSetRxCallback(UART_RX_Handler);    
 	
-	
-		/*	Enable Global Interrupt		*/
-		sei();
     
 		/*****************************************************************************/
 	
+			
+		/*	Enable Global Interrupt		*/
+		sei();	
+		
+		/*	small delay before LCD clear	*/
 		_delay_ms(10);
 	
 		/*	Clear Display	*/
@@ -192,13 +205,13 @@ int main(void)
 		}
 
 
-		/* Send Trigger to Ultrasonic */
+		/* Send Trigger pulse to Ultrasonic */
 	    Send_Trigger_Pulse();
 		/*	Delay for ultrasonic also	*/
 	    _delay_ms(30);
 		
 		
-
+		/*	Comparing the previous and current distances */
 		if (fabs(g_distance_cm - g_last_distance) >= DISTANCE_THRESHOLD_CM)
 		{
 			
@@ -215,7 +228,7 @@ int main(void)
 			g_last_distance = g_distance_cm;
 		}
 
-		/*	Even if the distance hasn’t changed, still check if it’s too close	*/ 
+		/*	Even if the distance hasnâ€™t changed, still check if itâ€™s too close	*/ 
 		if (g_distance_cm <= CRITICAL_DISTANCE_CM)
 		{
 			/*	Turn on The responsible LED	*/
@@ -227,7 +240,7 @@ int main(void)
 			LED_vTurnOffLED('a', PIN_NO_0);
 		}
 
-
+		/*	a delay For not confusing the ultrasonic	*/
 	    _delay_ms(200);		
 		
     
@@ -241,24 +254,27 @@ int main(void)
 
 
 /************************************************************************/
-/*								ISR										*/
+/*								ISRs									*/
 /************************************************************************/
 
-/**/
+/*	Timer 1 CTC mode callback function to handle reaching max time of usage of the machine	*/
 void CTC_TimerHandler()
 {
+	/*	counter used to count the number of entering the interrupt	*/
 	static u8 counter = 0 ;
 	
+	/*	condition to do the logic is after 30 seconds (Max time of using the machine)*/
 	if(counter >= 30)
 	{
 
-		/**/
+		/*	Activating the flag		*/
 		g_Usage_Time_ofMachine_flag = 1 ;
 		
-		/**/
+		/*	Reset the counter	*/
 		counter = 0 ;
 	}
 	
+	/*	incrementing if not reached the 30 second	*/
 	counter++;
 	
 	
@@ -266,11 +282,10 @@ void CTC_TimerHandler()
 
 
 
-/**/
+/*	Callback Function of the external interrupt 0 that senses the signal from the vibration sensor , then fires the interrupt */
 void EXTI0_Handler()
 {
-
-	
+	 /*	activating the flag */	
 	 g_vibration_flag = 1;
 }
 
@@ -278,33 +293,26 @@ void EXTI0_Handler()
 
 
 
-/**/
+/*	Callback Function of the external interrupt 1 that senses the signal from the smoke sensor , then fires the interrupt */
 void EXTI1_Handler(void)
 {
-
+	/*	activating the flag */
 	g_smoke_flag = 1 ;
 	
 }
 
 
 
-/*	Function That sends the trigger pulse for the ultrasonic distance	*/
-void Send_Trigger_Pulse(void) 
-{
-	DIO_vSet_Pin_Value('c',PIN_NO_0,HIGH);         /* Set PB0 high	*/
-	_delay_us(10);								  /*  10 µs pulse   */
-	DIO_vSet_Pin_Value('c',PIN_NO_0,LOW);        /*  Set PB0 low	*/
-}
 
 
 
 
 
-/*	Callback function that will be called in the ISR	*/
+/*	Callback function of the ICU interrupt that calculates the distance of the ultrasonic reading	*/
 void ICU_Handler(void)
 {
 	
-	
+	/*	First State	*/
 	if (g_state == 0)
 	{
 		
@@ -314,9 +322,11 @@ void ICU_Handler(void)
 		/*	Setting to detect the falling edge	*/
 		ICU_SetEdge(ICU_FALLING_EDGE);
 		
+		/*	To switch to the second state in the second interrupt fire	*/
 		g_state = 1 ;
 	} 
 	
+	/*	Second State	*/
 	else if (g_state == 1)
 	{
 		 /* Falling edge detected ? echo pulse ended		*/
@@ -336,12 +346,13 @@ void ICU_Handler(void)
 		 
 		 g_pulse_width = g_end_time - g_start_time ;
 		
-		 g_distance_cm = (g_pulse_width * 128.0f) / 58.0f;  /* Convert to cm	*/
+		 g_distance_cm = (g_pulse_width * 128.0f) / 58.0f;  /* Convert distance to cm	*/
 		
 		
 		/*	Setting to detect the rising edge	*/
 		ICU_SetEdge(ICU_RISING_EDGE);
 		
+		/*	To switch to the second state in the first interrupt fire	*/
 		g_state = 0 ;
 		
 	}
@@ -351,39 +362,51 @@ void ICU_Handler(void)
 
 
 
-
+/*	UART RX Callback function for handling the data coming from the bluetooth module using UART	*/
 void UART_RX_Handler(u8 DataReceived)
 {
 	if (DataReceived == 'a')
 	{
-		SERVO_vRotateMotor('a', SERVO_ANGLE_0);
-		SERVO_vRotateMotor('b', SERVO_ANGLE_0);
-		DIO_vSet_Pin_Value('d', PIN_NO_3, ONE);
+		SERVO_vRotateMotor('a', SERVO_ANGLE_0);/*	Rotate Motor on Channel OCR1A To Zero degrees	*/
+		
 	}
 	else if (DataReceived == 'b')
 	{
-		SERVO_vRotateMotor('a', SERVO_ANGLE_45);
-		SERVO_vRotateMotor('b', SERVO_ANGLE_45);
-		DIO_vSet_Pin_Value('d', PIN_NO_3, ZERO);
+		SERVO_vRotateMotor('a', SERVO_ANGLE_45);/*	Rotate Motor on Channel OCR1A To 45 degrees	*/
+		
+		
 	}
 	else if (DataReceived == 'c')
 	{
-		SERVO_vRotateMotor('a', SERVO_ANGLE_90);
-		SERVO_vRotateMotor('b', SERVO_ANGLE_90);
-		DIO_vSet_Pin_Value('d', PIN_NO_7, ONE);
+		SERVO_vRotateMotor('a', SERVO_ANGLE_90);/*	Rotate Motor on Channel OCR1A To 90 degrees	*/
+		
+		
 	}
 	else if (DataReceived == 'd')
 	{
-		SERVO_vRotateMotor('a', SERVO_ANGLE_135);
-		SERVO_vRotateMotor('b', SERVO_ANGLE_135);
-		DIO_vSet_Pin_Value('d', PIN_NO_7, ZERO);
+		SERVO_vRotateMotor('a', SERVO_ANGLE_135);/*	Rotate Motor on Channel OCR1A To 135 degrees	*/
+		
+		
 	}
 	else if (DataReceived == 'e')
 	{
-		SERVO_vRotateMotor('a', SERVO_ANGLE_180);
-		SERVO_vRotateMotor('b', SERVO_ANGLE_180);
-		DIO_vSet_Pin_Value('c', PIN_NO_0, ONE);
+		SERVO_vRotateMotor('a', SERVO_ANGLE_180);/*	Rotate Motor on Channel OCR1A To 180 degrees	*/
+		
+		
 	}
 
 
+}
+
+
+/************************************************************************/
+/*							Used Functions                              */
+/************************************************************************/
+
+/*	Function That sends the trigger pulse for the ultrasonic distance	*/
+void Send_Trigger_Pulse(void)
+{
+	DIO_vSet_Pin_Value('c',PIN_NO_0,HIGH);         /* Set PB0 high	*/
+	_delay_us(10);								  /*  10 Âµs pulse   */
+	DIO_vSet_Pin_Value('c',PIN_NO_0,LOW);        /*  Set PB0 low	*/
 }
