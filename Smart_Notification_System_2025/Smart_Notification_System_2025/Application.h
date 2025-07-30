@@ -27,6 +27,7 @@
 #include "PWM/PWM_Timer1.h"
 #include "SERVO/Servo_Motor.h"
 #include "UART/UART.h"
+#include "ADC/ADC.h"
 
 /************************************************************************/
 /*						#defines for used Macros                        */
