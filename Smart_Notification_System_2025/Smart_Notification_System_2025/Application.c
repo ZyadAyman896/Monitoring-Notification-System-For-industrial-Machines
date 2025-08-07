@@ -6,9 +6,6 @@
  */ 
 
 
-/*	CPU Speed	*/
-#define F_CPU 8000000UL
-
 #include "Application.h"
 
 
@@ -17,7 +14,7 @@
 /************************************************************************/
 
 /*	Variable for Uart received data	*/
-u8 DataReceived ;
+volatile u8 DataReceived ;
 
 /*	Variables for the ICU Peripheral	*/
 volatile u8  g_state = 0 ;
@@ -37,6 +34,17 @@ volatile u8 g_vibration_flag = 0;
 /*	flag used for ISR of Timer1 CTC used for time of usage of machine flag	 */
 volatile u8 g_Usage_Time_ofMachine_flag = 0;
 
+/** Variable to hold the latest raw ADC value read from the temperature sensor (e.g., LM35) */
+volatile u16 g_temp_adc_value = 0;
+
+/** Variable to store the converted temperature in Celsius from the raw ADC value */
+volatile float32 g_temp_celsius = 0;
+
+/** Flag set by the Timer1 (CTC) ISR to signal that a new temperature value is available for processing */
+volatile u8 g_CheckTempFlag = 0;
+
+
+
 
 
 
@@ -53,9 +61,6 @@ int main(void)
 		u8 DataReceived ;
 		
 		
-		/*	Init of the Servo motor		*/
-		SERVO_vInit(1);	
-		
 		/*	LCD Init with 4-Bit mode	*/
 		LCD_vInit();
 	
@@ -66,11 +71,14 @@ int main(void)
 		ADC_Config_t adcConfig = {
 			.ref = ADC_REF_AVCC,
 			.adjust = ADC_RIGHT_ADJUST,
-			.prescaler = ADC_PRESCALER_64
+			.prescaler = ADC_PRESCALER_64 ,
+			.interrupt_enable = 0	/*	Enable Interrupt for Adc	*/
 		};
 
 		/*	Init of ADC with specific configurations	*/
-		ADC_vInit(adcConfig);		
+		ADC_vInit(&adcConfig);		
+
+		
 	
 		/*****************************************************************************/
 		/*****************************Ultrasonic Init*********************************/
@@ -138,7 +146,7 @@ int main(void)
 		UART_vInit(UART_INTERRUPT_ENABLE,UART_BAUD_9600);
 	
 		/*	Setting the callback function to be called by the ISR	*/
-		UART_vSetRxCallback(UART_RX_Handler);    
+		//UART_vSetRxCallback(UART_RX_Handler);    
 	
     
 		/*****************************************************************************/
@@ -156,90 +164,265 @@ int main(void)
     while (1) 
     {
 		
+		
+		/*------ Machine Usage Time Alert -------*/
 		/*	Checking on activation of Much Time usage of machine Flag from the ISR or not	*/
-		if (g_Usage_Time_ofMachine_flag == 1)
+		if (g_Usage_Time_ofMachine_flag == 1 )
 		{
+			/*	Disable global interrupts	*/
+			cli();
+			
+						
 			/*	Clearing Display of LCD	 */
 			LCD_vClear_Display();
-						
+			
+			/**/
+			LED_vTurnOnLED('c',PIN_NO_5);
+			
+			_delay_ms(10);
+			
 			/*	Alerting for Much Time usage of machine on LCD	*/
 			LCD_vBlinkCenteredStrings("Turn-Off","The Machine",3);
+			
+			
+			/**/
+			UART_vSendString("turn off");
+			
+
+			
+			/**/
+			_delay_ms(1000);
 
 			/*	flag deactivation	*/
 			g_Usage_Time_ofMachine_flag = 0;
 			
+
+			
 			/*	Clearing Display of LCD	 */
-			LCD_vClear_Display();			
+			LCD_vClear_Display();	
+			
+			/**/
+			_delay_ms(20);
+			
+			/*	Enable global interrupts again	*/
+			sei();					
+		}
+		else if (g_Usage_Time_ofMachine_flag == 0)
+		{
+			/**/
+			LED_vTurnOffLED('c',PIN_NO_5);
 		}
 		
+		/*------ Vibration Alert -------*/
 		/*	Checking on activation of High Vibration Flag from the ISR or not	*/
-		if (g_vibration_flag == 1) 
+		if (g_vibration_flag == 1 ) 
 		{
+			/*	Disable global interrupts	*/
+			cli();
+			
+			/*	flag deactivation	*/
+			g_vibration_flag = 0;			
+
+			/*	Enable global interrupts again	*/
+			sei();		
+			
 			/*	Clearing Display of LCD	 */
 			LCD_vClear_Display();
+			
+			/**/
+			LED_vTurnOnLED('c', PIN_NO_4);
 			
 			/*	Alerting for High vibration detecting on LCD	*/
 			LCD_vBlinkCenteredStrings("High", "Vibration", 3);
 			
-			/*	flag deactivation	*/
-			g_vibration_flag = 0;
+			/**/
+			UART_vSendString("High Vibration");
+			
+			/**/
+			_delay_ms(50);
+		
+				
 
+			
+		
 			/*	Clearing Display of LCD	 */
-			LCD_vClear_Display();			
+			LCD_vClear_Display();	
+			
+			
+			/**/
+			_delay_ms(50);
+			
+			
+
+								
+		}
+		else if (g_vibration_flag == 0 )
+		{
+			/**/
+			LED_vTurnOffLED('c', PIN_NO_4);
+			
 		}
 		
+		/*------ Smoke Alert -------*/
 		/*	Checking on activation of Smoke Detection Flag from the ISR or not	*/
-		if (g_smoke_flag == 1) 
+		if (g_smoke_flag == 1 ) 
 		{
+			/*	Disable global interrupts	*/
+			cli();
+			
+			
 			/*	Clearing Display of LCD	 */
 			LCD_vClear_Display();
 			
+			/**/
+			LED_vTurnOnLED('c', PIN_NO_3);
+			
+			/**/
+			_delay_ms(2);
+			
 			/*	Alerting for Smoke detecting on LCD	*/
 			LCD_vBlinkCenteredStrings("Smoke", "Detected", 3);
+		
+			
+			UART_vSendString("Smoke Detected");
+			
+			/**/
+			_delay_ms(50);
+			
 			
 			/*	flag deactivation	*/
 			g_smoke_flag = 0;
+			
+			
 
 			/*	Clearing Display of LCD	 */
-			LCD_vClear_Display();			
+			LCD_vClear_Display();	
+			
+			/**/
+			_delay_ms(20);
+			
+			/*	Enable global interrupts again	*/
+			sei();		
+		}
+		else if (g_smoke_flag == 0)
+		{
+			/**/
+			LED_vTurnOffLED('c', PIN_NO_3);
 		}
 
-
+		
+		/*------ Ultrasonic Proximity Status Update -------*/
 		/* Send Trigger pulse to Ultrasonic */
-	    Send_Trigger_Pulse();
-		/*	Delay for ultrasonic also	*/
-	    _delay_ms(30);
+		Send_Trigger_Pulse();
+		_delay_ms(30);
+
+		/* Only update status if proximity changes */
+		u8 is_near = (g_distance_cm <= CRITICAL_DISTANCE_CM);
+		u8 was_near = (g_last_distance <= CRITICAL_DISTANCE_CM);
+
+		if (is_near != was_near)
+		{
+			/*	Disable global interrupts	*/
+			cli();
+						
+			/**/
+			LCD_vSendString_xy(0,0,"                ");
+			
+			/**/
+			_delay_ms(10);
+			
+			/**/
+			LCD_vSendString_xy(0, 0, "Proximity :       ");
+
+			if (is_near == 1 )
+			{
+
+				
+				_delay_ms(10);
+				LCD_vSendString_xy(0, 12, "N/OK");
+				
+
+				
+				LED_vTurnOnLED('c', PIN_NO_1);
+			
+			}
+			else if (is_near == 0 )
+			{
+				
+				
+				_delay_ms(10);
+				LCD_vSendString_xy(0, 12, "OK");
+				
+
+				
+				LED_vTurnOffLED('c', PIN_NO_1);
+				
+				
+			}
+			
+			g_last_distance = g_distance_cm;  /*	Store for future comparison		*/ 
+			
+			/**/
+			_delay_ms(20);
+			
+			/*	Enable global interrupts again	*/
+			sei();
+						
+		}
+
 		
 		
-		/*	Comparing the previous and current distances */
-		if (fabs(g_distance_cm - g_last_distance) >= DISTANCE_THRESHOLD_CM)
+		/*------ LCD Temp Status Update -------*/
+		if (g_CheckTempFlag == 1 )
 		{
 			
-			LCD_vSendString_xy(0,0,"Distance=      ");  /*	Pad with spaces to clear old values	*/ 
-
-			/*	Move to position after "Distance="	*/ 
-			LCD_vMoveCursor(0, 9);
-			LCD_vSendFloat(g_distance_cm, 1);    /*	Print with 1 decimal place	*/ 
+			/*	Disable global interrupts	*/
+			cli();			
+			
 
 			
-			LCD_vSendString_xy(1,0,"cm          ");     /*	Clear any old unit or data	*/ 
+			/**/
+			g_CheckTempFlag = 0;
 
-			/*	Updating the value of the distance	*/
-			g_last_distance = g_distance_cm;
-		}
+			/*	Start ADC conversion, compare value, and display	*/ 
+			u16 temp = ADC_u16Read_Value(ADC_CHANNEL_2);
+			u8 celsius = (u8)((temp * 500UL) / 1024); // Assuming 10mV/°C scaling
 
-		/*	Even if the distance hasn’t changed, still check if it’s too close	*/ 
-		if (g_distance_cm <= CRITICAL_DISTANCE_CM)
-		{
-			/*	Turn on The responsible LED	*/
-			LED_vTurnOnLED('a', PIN_NO_0);
-		}
-		else if(g_distance_cm > CRITICAL_DISTANCE_CM)
-		{
-			/*	Turn off The responsible LED	*/
-			LED_vTurnOffLED('a', PIN_NO_0);
-		}
+			if (celsius >= TEMP_THRESHOLD_C)
+			{
+				
+				LCD_vSendString_xy(1,0,"                ");
+				
+				_delay_ms(10);
+				
+				LCD_vSendString_xy(1, 0, "Temp : Overheat ");
+				
+			
+				
+				LED_vTurnOnLED('c', PIN_NO_2);
+			}
+			else
+			{
+				LCD_vSendString_xy(1,0,"                ");
+				_delay_ms(10);
+				LCD_vSendString_xy(1, 0, "Temp : Normal   ");
+				UART_vSendString("Temp Normal");
+				
+				
+		
+				
+				LED_vTurnOffLED('c', PIN_NO_2);
+			}
+			
+			_delay_ms(20);
 
+			
+			/*	Enable global interrupts again	*/
+			sei();
+		}
+		
+		
+		
 		/*	a delay For not confusing the ultrasonic	*/
 	    _delay_ms(200);		
 		
@@ -258,26 +441,27 @@ int main(void)
 /************************************************************************/
 
 /*	Timer 1 CTC mode callback function to handle reaching max time of usage of the machine	*/
+/* Timer1 CTC interrupt handler */
 void CTC_TimerHandler()
 {
-	/*	counter used to count the number of entering the interrupt	*/
-	static u8 counter = 0 ;
-	
-	/*	condition to do the logic is after 30 seconds (Max time of using the machine)*/
-	if(counter >= 30)
-	{
+	static u8 usage_counter = 0;
+	static u8 temp_counter = 0;
 
-		/*	Activating the flag		*/
-		g_Usage_Time_ofMachine_flag = 1 ;
-		
-		/*	Reset the counter	*/
-		counter = 0 ;
+	/* -------- Handle max usage time (30 seconds) -------- */
+	usage_counter++;
+	if (usage_counter >= 30)
+	{
+		g_Usage_Time_ofMachine_flag = 1;
+		usage_counter = 0;
 	}
-	
-	/*	incrementing if not reached the 30 second	*/
-	counter++;
-	
-	
+
+	/* -------- Handle temperature check (every 20 seconds) -------- */
+	temp_counter++;
+	if (temp_counter >= 20)
+	{
+		g_CheckTempFlag = 1;
+		temp_counter = 0;
+	}
 }
 
 
@@ -362,41 +546,27 @@ void ICU_Handler(void)
 
 
 
-/*	UART RX Callback function for handling the data coming from the bluetooth module using UART	*/
+/*	UART RX Callback function for handling the data coming from the bluetooth module using UART	
 void UART_RX_Handler(u8 DataReceived)
 {
-	if (DataReceived == 'a')
+	switch (DataReceived)
 	{
-		SERVO_vRotateMotor('a', SERVO_ANGLE_0);/*	Rotate Motor on Channel OCR1A To Zero degrees	*/
-		
+		/*	Rotate Motor on Channel OCR1A To Zero degrees	
+		case 'a': SERVO_vRotateMotor('a', SERVO_ANGLE_0);   break;
+		/*	Rotate Motor on Channel OCR1A To 45 degrees	
+		case 'b': SERVO_vRotateMotor('a', SERVO_ANGLE_45);  break;
+		/*	Rotate Motor on Channel OCR1A To 90 degrees	
+		case 'c': SERVO_vRotateMotor('a', SERVO_ANGLE_90);  break;
+		/*	Rotate Motor on Channel OCR1A To 135 degrees	
+		case 'd': SERVO_vRotateMotor('a', SERVO_ANGLE_135); break;
+		/*	Rotate Motor on Channel OCR1A To 180 degrees	
+		case 'e': SERVO_vRotateMotor('a', SERVO_ANGLE_180); break;
 	}
-	else if (DataReceived == 'b')
-	{
-		SERVO_vRotateMotor('a', SERVO_ANGLE_45);/*	Rotate Motor on Channel OCR1A To 45 degrees	*/
-		
-		
-	}
-	else if (DataReceived == 'c')
-	{
-		SERVO_vRotateMotor('a', SERVO_ANGLE_90);/*	Rotate Motor on Channel OCR1A To 90 degrees	*/
-		
-		
-	}
-	else if (DataReceived == 'd')
-	{
-		SERVO_vRotateMotor('a', SERVO_ANGLE_135);/*	Rotate Motor on Channel OCR1A To 135 degrees	*/
-		
-		
-	}
-	else if (DataReceived == 'e')
-	{
-		SERVO_vRotateMotor('a', SERVO_ANGLE_180);/*	Rotate Motor on Channel OCR1A To 180 degrees	*/
-		
-		
-	}
-
+	
 
 }
+*/	
+
 
 
 /************************************************************************/
