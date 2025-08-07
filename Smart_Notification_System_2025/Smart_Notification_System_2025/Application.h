@@ -9,6 +9,9 @@
 #ifndef APPLICATION_H_
 #define APPLICATION_H_
 
+/*	CPU Speed	*/
+#define F_CPU 8000000UL
+
 /************************************************************************/
 /*							#INCLUDES                                   */
 /************************************************************************/
@@ -33,8 +36,12 @@
 /*						#defines for used Macros                        */
 /************************************************************************/
 
+/*	#defines For Ultrasonic		*/
 #define DISTANCE_THRESHOLD_CM 0.5
 #define CRITICAL_DISTANCE_CM  200
+
+/*	#define for Temperature Sensor		*/
+#define TEMP_THRESHOLD_C 28.0  /*	Adjust based on your safe range		*/ 
 
 
 /************************************************************************/
@@ -55,9 +62,6 @@ void Send_Trigger_Pulse(void);
 
 /*	Callback function that will be called in the ISR	*/
 void ICU_Handler(void);
-
-/**/
-void UART_RX_Handler(u8 DataReceived);
 
 
 
